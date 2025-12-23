@@ -1,0 +1,4 @@
+--2023-09-12 15:25:49--  https://cdn-lfs.huggingface.co/repos/73/11/731107d7df05c1dca8de4e621c3c5c4f300889093ba93993d6c15753e6ef59eb/1d49bd662038808878c9d7420e0f583f506fe69086cc384f0da88f0b3a4e1115?response-content-disposition=attachment%3B+filename*%3DUTF-8%27%27rmvpe.pt%3B+filename%3D%22rmvpe.pt%22%3B
+Resolving cdn-lfs.huggingface.co (cdn-lfs.huggingface.co)... 108.160.165.211, 2a03:2880:f12c:83:face:b00c:0:25de
+Connecting to cdn-lfs.huggingface.co (cdn-lfs.huggingface.co)|108.160.165.211|:443... failed: Connection timed out.
+Connecting to cdn-lfs.huggingface.co (cdn-lfs.huggingface.co)|2a03:2880:f12c:83:face:b00c:0:25de|:443... failed: Network is unreachable.
