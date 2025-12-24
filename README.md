@@ -82,6 +82,14 @@ huggingface-cli download shawnpi/HQ-SVC --include "utils/pretrain/*" --local-dir
 python gradio_app.py
 ```
 
+* 如果报错 Caught signal 11 (Segmentation fault: address not mapped to object at address (nil)) 
+* 请执行以下代码后再启动上述代码
+```bash
+unset LD_LIBRARY_PATH
+``` 
+
+
+
 <div align="center">
 <img src="images/sr.png" alt="sr" width="500">
 
