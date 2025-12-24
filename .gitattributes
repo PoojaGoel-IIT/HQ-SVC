@@ -53,3 +53,5 @@ utils/Amphion/imgs/vocoder/diffusion/pipeline.png filter=lfs diff=lfs merge=lfs 
 utils/Amphion/imgs/vocoder/gan/MSSBCQTD.png filter=lfs diff=lfs merge=lfs -text
 utils/Amphion/visualization/SingVisio/System_Introduction_of_SingVisio.pdf filter=lfs diff=lfs merge=lfs -text
 utils/pretrain/nsf_hifigan/model filter=lfs diff=lfs merge=lfs -text
+images/sr.png filter=lfs diff=lfs merge=lfs -text
+images/svc.png filter=lfs diff=lfs merge=lfs -text
