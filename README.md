@@ -6,6 +6,8 @@ tags:
 - synthesis
 - aigc
 - super-resolution
+license: apache-2.0
+pipeline_tag: audio-to-audio
 ---
 # HQ-SVC: Towards High-Quality Zero-Shot Singing Voice Conversion in Low-Resource Scenarios
 Official Repository of Paper: "Towards High-Quality Zero-Shot Singing Voice Conversion in Low-Resource Scenarios"(AAAI 2026)
