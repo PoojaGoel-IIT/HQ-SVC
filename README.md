@@ -22,6 +22,14 @@ Official Repository of Paper: "Towards High-Quality Zero-Shot Singing Voice Conv
     <img src="https://img.shields.io/badge/GitHub-Repository-blue?logo=github" alt="GitHub Repository"></a>
 </div>
 
+HQ-SVC is an efficient framework for high-quality zero-shot singing voice conversion (SVC) in low-resource scenarios. It achieves disentanglement of content and speaker features via a unified decoupled codec, and enhances synthesis quality through multi-feature fusion and progressive optimization.
+
+Unlike existing methods that demand large datasets or heavy computational resources, **HQ-SVC** unifies:
+- 🚀 Zero-shot conversion for unseen speakers without fine-tuning
+- ⚡ Low-resource training (single consumer-grade GPU, <80h data)
+- 🎧 Dual capabilities: high-quality singing voice conversion + voice super-resolution
+- 🎯 Superior naturalness and speaker similarity compared to SOTA methods
+
 ## 🗞 News
 
 - **[2025-11-08]** 🎉 Paper accepted by AAAI 2026
@@ -39,14 +47,6 @@ Official Repository of Paper: "Towards High-Quality Zero-Shot Singing Voice Conv
 ## ✨ New features
 - [ ] Singing style control
 - [ ] Improved quality
-
-HQ-SVC is an efficient framework for high-quality zero-shot singing voice conversion (SVC) in low-resource scenarios. It achieves disentanglement of content and speaker features via a unified decoupled codec, and enhances synthesis quality through multi-feature fusion and progressive optimization.
-
-Unlike existing methods that demand large datasets or heavy computational resources, **HQ-SVC** unifies:
-- 🚀 Zero-shot conversion for unseen speakers without fine-tuning
-- ⚡ Low-resource training (single consumer-grade GPU, <80h data)
-- 🎧 Dual capabilities: high-quality singing voice conversion + voice super-resolution
-- 🎯 Superior naturalness and speaker similarity compared to SOTA methods
 
 ## 🎸 Try Inference
 ### 1. Download Codes and Environment（下载代码和环境）
