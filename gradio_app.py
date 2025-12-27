@@ -6,70 +6,27 @@ import gradio as gr
 import soundfile as sf
 import tempfile
 import hashlib
-import atexit
-from importlib.metadata import version, PackageNotFoundError
+import requests
+from huggingface_hub import snapshot_download
 
-# ================= 1. 增强型依赖追踪逻辑 =================
-def save_used_dependencies():
-    """
-    导出当前运行环境下已加载的第三方库及其版本。
-    """
-    print("\n[System] 正在扫描内存中的依赖组件...")
-    used_packages = set()
-    
-    # 映射表：导入名 -> PyPI 上的安装包名
-    # 研三学生常用库映射
-    mapping = {
-        "yaml": "PyYAML",
-        "cv2": "opencv-python",
-        "sklearn": "scikit-learn",
-        "skimage": "scikit-image",
-        "faiss": "faiss-cpu",  # 或 faiss-gpu
-        "gradio": "gradio",
-        "torch": "torch",
-        "numpy": "numpy",
-        "soundfile": "soundfile",
-        "librosa": "librosa",
-        "scipy": "scipy"
-    }
+# ================= 1. 环境与自动同步逻辑 =================
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
 
-    # 遍历当前所有已加载模块
-    for name in list(sys.modules.keys()):
-        root_package = name.split('.')[0]
-        
-        # 排除内置模块
-        if root_package in sys.builtin_module_names:
-            continue
-            
-        final_name = mapping.get(root_package, root_package)
-        used_packages.add(final_name)
-    
-    # 过滤掉本地文件夹模块和 pip 相关工具
-    # 根据你的项目结构，排除 logger 和 utils
-    excluded = {'pip', 'setuptools', 'wheel', 'pkg_resources', 'logger', 'utils', 'importlib'} 
-    final_list = sorted(list(used_packages - excluded))
+def sync_model_files():
+    repo_id = "shawnpi/HQ-SVC"
+    print(f">>> 正在同步模型权重 ({repo_id})...")
+    try:
+        snapshot_download(
+            repo_id=repo_id,
+            allow_patterns=["utils/pretrain/*", "config.json"], 
+            local_dir=".",
+            local_dir_use_symlinks=False
+        )
+        print(">>> 权重同步完成")
+    except Exception as e:
+        print(f">>> 同步失败: {e}")
 
-    output_path = 'used_requirements.txt'
-    lines = []
-    for pkg in final_list:
-        try:
-            # 获取版本号
-            ver = version(pkg)
-            lines.append(f"{pkg}=={ver}")
-        except PackageNotFoundError:
-            # 可能是本地库或者无法识别安装来源
-            if pkg not in ['__main__', 'atexit', 'tempfile', 'hashlib']:
-                lines.append(f"{pkg}")
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write("\n".join(lines))
-    
-    msg = f"✨ 依赖清单已更新至: {os.path.abspath(output_path)}"
-    print(msg)
-    return msg
-
-# 注册正常退出时的钩子
-atexit.register(save_used_dependencies)
+sync_model_files()
 
 # ================= 2. 路径与模型加载逻辑 =================
 now_dir = os.path.dirname(os.path.abspath(__file__))
@@ -78,7 +35,6 @@ utils_path = os.path.join(now_dir, 'utils')
 if utils_path not in sys.path:
     sys.path.append(utils_path)
 
-# 注意：这些导入需要确保你的目录结构正确
 from logger.utils import load_config
 from utils.models.models_v2_beta import load_hq_svc
 from utils.vocoder import Vocoder
@@ -107,47 +63,76 @@ def initialize_models(config_path):
         "content_encoder": None, "spk_encoder": None
     }
 
-# ================= 3. 推理逻辑 =================
+# ================= 3. 推理逻辑 (增强鲁棒性) =================
 def predict(source_audio, target_files, shift_key, adjust_f0):
     global TARGET_CACHE
-    if source_audio is None: return "错误: 未检测到源音频", None
+    
+    # --- 鲁棒性检查 1: 检查源音频是否上传完毕 ---
+    if source_audio is None:
+        return "⚠️ 系统提示：未检测到源音频。请确认已选择文件，并等待上传进度条走完后再重新转换。", None
+
+    # --- 鲁棒性检查 2: 检查文件路径有效性 ---
+    if not os.path.exists(source_audio):
+        return "❌ 系统错误：音频文件传输中断，请刷新页面重新上传音频。", None
+
+    # --- 鲁棒性检查 3: 检查音频格式 (防止上传了奇怪的文件) ---
+    valid_exts = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus']
+    if not any(source_audio.lower().endswith(ext) for ext in valid_exts):
+        return f"❌ 系统错误：不支持该文件格式。请上传 {', '.join(valid_exts)} 格式的音频。", None
+
     sr, encoder_sr, device = ARGS.sample_rate, ARGS.encoder_sr, ARGS.device
 
-    with torch.no_grad():
-        is_reconstruction = (target_files is None or len(target_files) == 0)
-        # 计算目标音频列表哈希以判断是否使用缓存
-        current_hash = hashlib.md5("".join([f.name if hasattr(f, 'name') else f for f in (target_files or [])]).encode()).hexdigest()
-        
-        if is_reconstruction:
-            t_data = get_processed_file(source_audio, sr, encoder_sr, VOCODER, PREPROCESSORS["volume_extractor"], PREPROCESSORS["f0_extractor"], PREPROCESSORS["fa_encoder"], PREPROCESSORS["fa_decoder"], None, None, device=device)
-            spk_ave, all_tar_f0 = t_data['spk'].squeeze().to(device), t_data['f0_origin']
-            status = "✨ 超分模式"
-        elif TARGET_CACHE["file_hash"] == current_hash:
-            spk_ave, all_tar_f0 = TARGET_CACHE["spk_ave"], TARGET_CACHE["all_tar_f0"]
-            status = "🚀 缓存命中"
-        else:
-            spk_list, f0_list = [], []
-            for f in target_files[:20]:
-                t_data = get_processed_file(f.name if hasattr(f, 'name') else f, sr, encoder_sr, VOCODER, PREPROCESSORS["volume_extractor"], PREPROCESSORS["f0_extractor"], PREPROCESSORS["fa_encoder"], PREPROCESSORS["fa_decoder"], None, None, device=device)
-                if t_data: spk_list.append(t_data['spk']); f0_list.append(t_data['f0_origin'])
-            spk_ave = torch.stack(spk_list).mean(dim=0).squeeze().to(device)
-            all_tar_f0 = np.concatenate(f0_list)
-            TARGET_CACHE.update({"file_hash": current_hash, "spk_ave": spk_ave, "all_tar_f0": all_tar_f0})
-            status = "✅ 音色提取完成"
+    try:
+        with torch.no_grad():
+            is_reconstruction = (target_files is None or len(target_files) == 0)
+            target_names = "".join([f.name if hasattr(f, 'name') else f for f in (target_files or [])])
+            current_hash = hashlib.md5(target_names.encode()).hexdigest()
+            
+            if is_reconstruction:
+                t_data = get_processed_file(source_audio, sr, encoder_sr, VOCODER, PREPROCESSORS["volume_extractor"], PREPROCESSORS["f0_extractor"], PREPROCESSORS["fa_encoder"], PREPROCESSORS["fa_decoder"], None, None, device=device)
+                spk_ave, all_tar_f0 = t_data['spk'].squeeze().to(device), t_data['f0_origin']
+                status = "✨ Super-Resolution"
+            elif TARGET_CACHE["file_hash"] == current_hash:
+                spk_ave, all_tar_f0 = TARGET_CACHE["spk_ave"], TARGET_CACHE["all_tar_f0"]
+                status = "🚀 Cache Loaded"
+            else:
+                spk_list, f0_list = [], []
+                for f in (target_files[:20] if target_files else []):
+                    # 再次校验目标参考音频是否有效
+                    f_path = f.name if hasattr(f, 'name') else f
+                    if not f_path or not os.path.exists(f_path): continue
+                    
+                    t_data = get_processed_file(f_path, sr, encoder_sr, VOCODER, PREPROCESSORS["volume_extractor"], PREPROCESSORS["f0_extractor"], PREPROCESSORS["fa_encoder"], PREPROCESSORS["fa_decoder"], None, None, device=device)
+                    if t_data: 
+                        spk_list.append(t_data['spk'])
+                        f0_list.append(t_data['f0_origin'])
+                
+                if not spk_list: 
+                    return "❌ 终端提示：目标参考音频上传失败或格式不正确，请重新上传。", None
+                
+                spk_ave = torch.stack(spk_list).mean(dim=0).squeeze().to(device)
+                all_tar_f0 = np.concatenate(f0_list)
+                TARGET_CACHE.update({"file_hash": current_hash, "spk_ave": spk_ave, "all_tar_f0": all_tar_f0})
+                status = "✅ VOICE CONVERSION"
 
-        src_data = get_processed_file(source_audio, sr, encoder_sr, VOCODER, PREPROCESSORS["volume_extractor"], PREPROCESSORS["f0_extractor"], PREPROCESSORS["fa_encoder"], PREPROCESSORS["fa_decoder"], None, None, device=device)
-        f0 = src_data['f0'].unsqueeze(0).to(device)
-        
-        if adjust_f0 and not is_reconstruction:
-            shift_key = round(12 * np.log2(all_tar_f0[all_tar_f0>0].mean()/src_data['f0_origin'][src_data['f0_origin']>0].mean()))
-        
-        f0 = f0 * 2 ** (float(shift_key) / 12)
-        mel_g = NET_G(src_data['vq_post'].unsqueeze(0).to(device), f0, src_data['vol'].unsqueeze(0).to(device), spk_ave, gt_spec=None, infer=True, infer_speedup=ARGS.infer_speedup, method=ARGS.infer_method, vocoder=VOCODER)
-        wav_g = VOCODER.infer(mel_g, f0) if ARGS.vocoder == 'nsf-hifigan' else VOCODER.infer(mel_g)
-        
-        out_p = tempfile.mktemp(suffix=".wav")
-        sf.write(out_p, wav_g.squeeze().cpu().numpy(), 44100)
-        return f"{status} | 变调: {shift_key}", out_p
+            src_data = get_processed_file(source_audio, sr, encoder_sr, VOCODER, PREPROCESSORS["volume_extractor"], PREPROCESSORS["f0_extractor"], PREPROCESSORS["fa_encoder"], PREPROCESSORS["fa_decoder"], None, None, device=device)
+            f0 = src_data['f0'].unsqueeze(0).to(device)
+            
+            if adjust_f0 and not is_reconstruction:
+                src_f0_valid = src_data['f0_origin'][src_data['f0_origin'] > 0]
+                tar_f0_valid = all_tar_f0[all_tar_f0 > 0]
+                if len(src_f0_valid) > 0 and len(tar_f0_valid) > 0:
+                    shift_key = round(12 * np.log2(tar_f0_valid.mean() / src_f0_valid.mean()))
+            
+            f0 = f0 * 2 ** (float(shift_key) / 12)
+            mel_g = NET_G(src_data['vq_post'].unsqueeze(0).to(device), f0, src_data['vol'].unsqueeze(0).to(device), spk_ave, gt_spec=None, infer=True, infer_speedup=ARGS.infer_speedup, method=ARGS.infer_method, vocoder=VOCODER)
+            wav_g = VOCODER.infer(mel_g, f0) if ARGS.vocoder == 'nsf-hifigan' else VOCODER.infer(mel_g)
+            
+            out_p = tempfile.mktemp(suffix=".wav")
+            sf.write(out_p, wav_g.squeeze().cpu().numpy(), 44100)
+            return f"{status} | Pitch Shifted: {shift_key}", out_p
+    except Exception as e:
+        return f"❌ 推理运行出错：{str(e)}。请尝试刷新页面并重新上传音频。", None
 
 # ================= 4. UI 界面 =================
 custom_css = """
@@ -175,7 +160,7 @@ def build_ui():
                 </div>
             </div>
         """)
-        gr.Markdown("# 🎸 HQ-SVC: SINGING VOICE CONVERSION 🍰")
+        gr.Markdown("# 🎸HQ-SVC: SINGING VOICE CONVERSION AND SUPER-RESOLUTION🍰")
         
         with gr.Row():
             with gr.Column():
@@ -191,36 +176,19 @@ def build_ui():
                 result_audio = gr.Audio(label="OUTPUT (44.1kHz HQ)")
 
         run_btn.click(predict, [src_audio, tar_files, key_shift, auto_f0], [status_box, result_audio])
-        
-        # 底部管理按钮
-        with gr.Row():
-            export_btn = gr.Button("📦 导出依赖清单", variant="secondary")
-            exit_btn = gr.Button("🚫 关闭系统", variant="stop")
-
-        # 逻辑绑定
-        export_btn.click(fn=save_used_dependencies, inputs=None, outputs=status_box)
-        
-        def safe_exit():
-            save_used_dependencies()
-            print("系统正在关闭...")
-            sys.exit(0) # 触发 atexit 钩子
-
-        exit_btn.click(fn=safe_exit, inputs=None, outputs=None)
 
     return demo
 
 if __name__ == "__main__":
-    # 确保配置文件路径正确
     config_p = "configs/hq_svc_infer.yaml"
     if os.path.exists(config_p):
         initialize_models(config_p)
     else:
-        print(f"警告: 找不到配置文件 {config_p}，请检查路径。")
+        print(f"警告: 找不到配置文件 {config_p}。")
         
     demo = build_ui()
-    
-    print(">>> 界面启动成功。")
-    print(">>> 提示：请进行至少一次转换推理，让系统加载动态依赖。")
-    
-    # allowed_paths 允许访问图片文件夹
-    demo.launch(share=True, allowed_paths=[os.path.join(now_dir, "images")])
+    temp_dir = tempfile.gettempdir()
+    demo.launch(
+        share=True,
+        allowed_paths=[os.path.join(now_dir, "images"), now_dir, temp_dir]
+    )
