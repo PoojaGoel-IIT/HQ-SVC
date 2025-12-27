@@ -160,7 +160,6 @@ def get_style_embed(style_prompt, tokenizer, model):
     return outputs[-1]
 
 def load_facodec(device):
-    # sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Amphion'))
     from Amphion.models.codec.ns3_codec import FACodecEncoderV2, FACodecDecoderV2
     fa_encoder = FACodecEncoderV2(
         ngf=32,
@@ -185,8 +184,11 @@ def load_facodec(device):
         use_gr_residual_f0=True,
         use_gr_residual_phone=True,
     )
-    encoder_ckpt = hf_hub_download(repo_id="amphion/naturalspeech3_facodec", filename="ns3_facodec_encoder_v2.bin")
-    decoder_ckpt = hf_hub_download(repo_id="amphion/naturalspeech3_facodec", filename="ns3_facodec_decoder_v2.bin")
+    # encoder_ckpt = hf_hub_download(repo_id="amphion/naturalspeech3_facodec", filename="ns3_facodec_encoder_v2.bin", local_dir="utils/pretrain")
+    # decoder_ckpt = hf_hub_download(repo_id="amphion/naturalspeech3_facodec", filename="ns3_facodec_decoder_v2.bin", local_dir="utils/pretrain")
+
+    encoder_ckpt = "utils/pretrain/ns3_facodec_encoder_v2.bin"
+    decoder_ckpt = "utils/pretrain/ns3_facodec_decoder_v2.bin"
 
     fa_encoder.load_state_dict(torch.load(encoder_ckpt))
     fa_decoder.load_state_dict(torch.load(decoder_ckpt))
@@ -221,10 +223,11 @@ def resample_and_normalize(audio, max_gain=0.6):
 
 def get_processed_file(input_path, sr, encoder_sr, mel_extractor, volume_extractor, f0_extractor, 
                        fa_encoder=None, fa_decoder=None, content_encoder=None, spk_encoder=None, 
-                       device='cuda', max_sec=30, f0_interpolate_mode='full'):
-    
-    max_audio_44k_len = sr * max_sec
-    max_audio_len = encoder_sr * max_sec
+                       device='cuda', max_sec=None, f0_interpolate_mode='full'):
+
+    if max_sec is not None:
+        max_audio_44k_len = sr * max_sec
+        max_audio_len = encoder_sr * max_sec
     
     # 1. 串行加载音频（必须先拿到数据才能提取特征）
     if not os.path.exists(input_path):
@@ -234,9 +237,10 @@ def get_processed_file(input_path, sr, encoder_sr, mel_extractor, volume_extract
         name = input_path.split('/')[-1].split('.')[0]
         audio_44k = load_audio(input_path, sr)
         audio = load_audio(input_path, encoder_sr)
-        
-        audio_44k = audio_44k[:min(len(audio_44k), max_audio_44k_len)]
-        audio = audio[:min(len(audio), max_audio_len)]
+
+        if max_sec is not None and max_audio_44k_len > 0:
+            audio_44k = audio_44k[:min(len(audio_44k), max_audio_44k_len)]
+            audio = audio[:min(len(audio), max_audio_len)]
         # 转换为 Tensor 供 GPU 任务使用
         audio_44k_t = torch.from_numpy(audio_44k).float().to(device).unsqueeze(0)
     except Exception as e:
